@@ -68,6 +68,40 @@ non_zero_sign :: (n: float64) -> int {
     return 2 * cast(int)(n > 0) - 1;
 }
 
+cross :: (a: Vector2, b: Vector2) -> float64 {
+    return a.x * b.y - a.y * b.x;
+}
+
+scale :: (v: Vector2, s: float) -> Vector2 {
+    r: Vector2;
+    r.x = v.x * s;
+    r.y = v.y * s;
+
+    return r;
+}
+
+mul_inner :: (a: Vector2, b: Vector2) -> float {
+    return b.x * a.x + b.y * a.y;
+}
+
+// leng is provided by length in built-in Math module
+// norm is provided by normalize in built-in Math module
+sub :: (a: Vector2, b: Vector2) -> Vector2 {
+    r: Vector2;
+    r.x = a.x - b.x;
+    r.y = a.y - b.y;
+    return r;
+}
+
+solve_quadratic :: (a: float64, b: float64, c: float64) -> [2]float64, int {
+    x: [2]float64;
+    if abs(a) < 1.0e-14 {
+
+    }
+
+    return x, 0;
+}
+
 #import "stb_truetype";
 #import "Math";
 #import "Basic";

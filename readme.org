@@ -1,0 +1,14 @@
+#+title: readme
+
+I was experimenting font rendering with Vulkan. I discovered
+multi-channel signed distance field, [[https://github.com/Chlumsky/msdfgen][msdfgen]] by Viktor Chlumsky. That
+library was CPU only. But for offline generation, that does not
+matter. But until I render CJK characters. A complete atlas of CJK
+characters would takes up to 800MB of memory, from a VRAM perspective,
+that is a nightmare. Dynamic cache is the way, but using the GPU to do
+the highly parallel glyph generation should be a lot reasonable. An
+alternative is [[https://github.com/nyyManni/msdfgl][msdfgl]], but that is in OpenGL.
+
+This repo is somehow based on [[https://github.com/pjako/msdf_c.git][msdf_c]] by pjako. Because the original
+msdfgen is filled with object oriented code that is a nightmare to
+read.

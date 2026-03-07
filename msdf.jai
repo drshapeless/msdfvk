@@ -50,7 +50,7 @@ Signed_Distance :: struct {
 Edge_Segment :: struct {
     color: int;
     p:     [4]Vector2;
-    type:  int;
+    type:  STBTT;
 }
 
 Edge_Color :: enum {
@@ -311,6 +311,41 @@ cubic_direction :: (e: Edge_Segment, param: float) -> Vector2 {
     r.x = t.x;
     r.y = t.y;
     return r;
+}
+
+direction :: (e: Edge_Segment, param: float) -> Vector2 {
+    if e.type == {
+    case .vline;
+        return linear_direction(e, param);
+    case .vcurve;
+        return quadratic_direction(e, param);
+    case .vcubic;
+        return cubic_direction(e, param);
+    }
+
+    assert(false);
+    return .{};
+}
+
+linear_point :: (e: Edge_Segment, param: float) -> Vector2 {
+    return mix(e.p[0], e.p[1], param);
+}
+
+quadratic_point :: (e: Edge_Segment, param: float) -> Vector2 {
+    a := mix(e.p[0], e.p[1], param);
+    b := mix(e.p[1], e.p[2], param);
+    return mix(a, b, param);
+}
+
+cubic_point :: (e: Edge_Segment, param: float) -> Vector2 {
+    p12 := mix(e.p[1], e.p[2], param);
+    a   := mix(e.p[0], e.p[1], param);
+    b   := mix(a, p12, param);
+
+    c   := mix(e.p[2], e.p[3], param);
+    d   := mix(p12, c, param);
+
+    return mix(b, d, param);
 }
 
 #import "stb_truetype";

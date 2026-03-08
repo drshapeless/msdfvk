@@ -401,15 +401,13 @@ gen_glyph :: (font: *stbtt_fontinfo, glyph_index: s32, border_width: u32, scale:
                 // sure whether the near_param would be zero TODO:
                 // check if the near_param can equal to zero if
                 // near_edge is set.
-                if r.near_param != 0 {
-                    dist_to_pseudo(*r.min_distance, p, r.near_param, r.near_edge);
-                }
-                if g.near_param != 0 {
-                    dist_to_pseudo(*g.min_distance, p, g.near_param, g.near_edge);
-                }
-                if b.near_param != 0 {
-                    dist_to_pseudo(*b.min_distance, p, b.near_param, b.near_edge);
-                }
+
+                dist_to_pseudo(*r.min_distance, p, r.near_param, r.near_edge);
+
+                dist_to_pseudo(*g.min_distance, p, g.near_param, g.near_edge);
+
+                dist_to_pseudo(*b.min_distance, p, b.near_param, b.near_edge);
+
 
                 med_min_dist = median(r.min_distance.dist, g.min_distance.dist, b.min_distance.dist);
 
@@ -426,15 +424,10 @@ gen_glyph :: (font: *stbtt_fontinfo, glyph_index: s32, border_width: u32, scale:
                 }
             }
 
-            if sr.near_param != 0 {
-                dist_to_pseudo(*sr.min_distance, p, sr.near_param, sr.near_edge);
-            }
-            if sg.near_param != 0 {
-                dist_to_pseudo(*sg.min_distance, p, sg.near_param, sg.near_edge);
-            }
-            if sb.near_param != 0 {
-                dist_to_pseudo(*sb.min_distance, p, sb.near_param, sb.near_edge);
-            }
+            dist_to_pseudo(*sr.min_distance, p, sr.near_param, sr.near_edge);
+            dist_to_pseudo(*sg.min_distance, p, sg.near_param, sg.near_edge);
+            dist_to_pseudo(*sb.min_distance, p, sb.near_param, sb.near_edge);
+
 
             msd: Multi_Distance;
             if pos_dist >= 0 && abs(pos_dist) <= abs(neg_dist) {
@@ -489,10 +482,14 @@ gen_glyph :: (font: *stbtt_fontinfo, glyph_index: s32, border_width: u32, scale:
 
     for y: 0..h - 1 {
         for x: 0..w - 1 {
-            if (x > 0 && pixel_clash(pixel_at(x, y, w, bitmap), pixel_at(max(x - 1, 0), y, w, bitmap), tx)) ||
-                (x < w - 1 && pixel_clash(pixel_at(x, y, w, bitmap), pixel_at(min(x + 1, w - 1), y, w, bitmap), tx)) ||
-                (y > 0 && pixel_clash(pixel_at(x, y, w, bitmap), pixel_at(max(y - 1, 0), y, w, bitmap), ty)) ||
-                (y < h - 1 && pixel_clash(pixel_at(x, y, w, bitmap), pixel_at(x, min(y + 1, h - 1), w, bitmap), ty))
+            if (x > 0 && pixel_clash(pixel_at(x, y, w, bitmap),
+                                     pixel_at(max(x - 1, 0), y, w, bitmap), tx)) ||
+                (x < w - 1 && pixel_clash(pixel_at(x, y, w, bitmap),
+                                          pixel_at(min(x + 1, w - 1), y, w, bitmap), tx)) ||
+                (y > 0 && pixel_clash(pixel_at(x, y, w, bitmap),
+                                      pixel_at(x, max(y - 1, 0), w, bitmap), ty)) ||
+                (y < h - 1 && pixel_clash(pixel_at(x, y, w, bitmap),
+                                          pixel_at(x, min(y + 1, h - 1), w, bitmap), ty))
                 {
                     clashes[cindex].x = x;
                     clashes[cindex].y = y;

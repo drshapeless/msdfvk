@@ -90,11 +90,77 @@ generate_codepoint_sdf :: (font: *stbtt_fontinfo, scale: float, glyph: s32, padd
 }
 
 #scope_file
-compute_crossings_x :: (x: float, y: float, nverts: s32, verts: []stbtt_vertex) {
+compute_crossings_x :: (x: float, y: float, verts: []stbtt_vertex) {
     orig := Vector2.{1, 0};
     ray  := Vector2.{1, 0};
+    winding :s32 = 0;
+
     y_frac := fmod_cycling(y, 1.0); // TODO: Does this equal to fmod in C?
-    winding := 0;
+
+    if y_frac < 0.01 {
+        y += 0.01;
+    } else if y_frac > 0.99 {
+        y -= 0.01;
+    }
+
+    for i: 0..verts.count - 1 {
+        // Don't really understand this part
+        if verts[i].type == xx STBTT.vline {
+            x0 := verts[i - 1].x;
+            y0 := verts[i - 1].y;
+            x1 := verts[i    ].x;
+            y1 := verts[i    ].y;
+            if y > min(y0, y1) && y < max(y0, y1) && x > min(x0, x1) {
+                x_inter := (y - y0) / (y1 - y0) * (x1 - x0) + x0;
+                if x_inter < x {
+                    winding += ifx y0 < y1 then 1 else -1;
+                }
+            }
+        }
+
+        if verts[i].type == xx STBTT.vcurve {
+            x0 := verts[i - 1].x;
+            y0 := verts[i - 1].y;
+            x1 := verts[i    ].cx;
+            y1 := verts[i    ].cy;
+            x2 := verts[i    ].x;
+            y2 := verts[i    ].y;
+
+            ax := min(x0, min(x1, x2));
+            ay := min(y0, min(y1, y2));
+            by := max(y0, max(y1, y2));
+            if y > ay && y < by && x > ax {
+                q0 := Vector2.{x0, y0};
+                q1 := Vector2.{x1, y1};
+                q2 := Vector2.{x2, y2};
+
+                // This reduce the curve into a line, same code as the above
+                // TODO: refractor it into a macro?
+                if q0 == q1 || q1 == q2 {
+                    x0 = verts[i - 1].x;
+                    y0 = verts[i - 1].y;
+                    x1 = verts[i    ].x;
+                    y1 = verts[i    ].y;
+                    if y > min(y0, y1) && y < max(y0, y1) && x > min(x0, x1) {
+                        x_inter := (y - y0) / (y1 - y0) * (x1 - x0) + x0;
+                        if x_inter < x {
+                            winding += ifx y0 < y1 then 1 else -1;
+                        }
+                    }
+                } else {
+
+                }
+            }
+        }
+    }
+}
+
+ray_intersect_bezier :: (orig: Vector2, ray: Vector2, q0: Vector2, q1: Vector2, q2: Vector2) -> hit_count:s32, hits:[2]Vector2 {
+
+}
+
+cross :: (a: Vector2, b: Vector2) -> float {
+
 }
 
 #import "Basic";

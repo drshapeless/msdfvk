@@ -90,8 +90,58 @@ Contour :: struct {
     edges: [] Edge;
 }
 
-edge_signed_distance :: (point: Vector2, edge: Edge) -> float {
+Signed_Distance :: struct {
+    distance: float;
+    dot:      float;
+}
 
+edge_signed_distance :: (point: Vector2, edge: Edge) -> Signed_Distance {
+    if edge.type == {
+    case .LINEAR;
+        point_start := point - edge.start; // aq
+        start_end := edge.end - edge.start; // ab
+        // projection parameter, param
+        t := dot(point_start, start_end) / dot(start_end, start_end);
+
+        // This is not efficient as the original code, but clearer
+        // Vector2 eq = p[param > .5]-origin;
+        eq: Vector2;
+        if t > 0.5 {
+            eq = end - point;
+        } else {
+            eq = point - start;
+        }
+
+        endpoint_distance := length(eq);
+        if t > 0 && t < 1 {
+            ortho_distance := dot(orthonormal(start_end), point_start);
+            if abs(ortho_distance) < endpoint_distance {
+                return .{ortho_distance, 0};
+            }
+        }
+        return Signed_Distance.{non_zero_sign(cross(point_start, start_end)) * endpoint_distance, abs(dot(normalize(start_end), normalize(eq)))};
+
+    case .QUADRATIC;
+    }
+}
+
+orthonormal :: (v: Vector2) -> Vector2 {
+    len := length(v);
+    return .{v.y / len, -v.x / len};
+}
+
+// Not fast but simple
+// return 2*(n > T(0))-1;
+non_zero_sign :: (n: float) -> float {
+    if n > 0 {
+        return 1;
+    } else {
+        return -1;
+    }
+}
+
+cross :: (a: Vector2, b: Vector2) -> float {
+    return a.x * b.y - a.y * b.x;
 }
 
 #import "stb_truetype";

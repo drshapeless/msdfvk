@@ -342,7 +342,205 @@ linear_dist :: (e: Edge_Segment, origin: Vector2) -> Signed_Distance, param:floa
 
 // quadratic edge signed distance
 quadratic_dist :: (e: Edge_Segment, origin: Vector2) -> Signed_Distance, param:float {
+    qa, ab, br: Vector2;
+    qa = e.start - origin;
+    ab = e.control - e.start;
+    // br.x = e.start.x + e.end.x - e.control.x - e.control.x;
+    // br.y = e.start.y + e.end.y - e.control.y - e.control.y;
+    br = e.start + e.end - e.control - e.control;
 
+    a := dot(br, br);
+    b := 3*dot(ab, br);
+    c := 2*dot(ab, ab) + dot(qa, br);
+    d := dot(qa, ab);
+
+    solution_count, solutions := solve_cubic(a, b, c, d);
+
+    // distance from a
+    min_distance := xx nonzero_sign(cross(ab, qa)) * length(qa);
+    param := -dot(qa, ab) / dot(ab, ab);
+    {
+        a := e.end - e.control;
+        b := e.end - origin;
+
+        // distance from b
+        distance := xx nonzero_sign(cross(a, b))*length(b);
+        if abs(distance) < abs(min_distance) {
+            min_distance = distance;
+
+            a = origin - e.control;
+            b = e.end - e.control;
+            param = dot(a, b) / dot(b, b);
+        }
+    }
+
+    for i: 0..solution_count - 1 {
+        t := solutions[i];
+        if t > 0 && t < 1 {
+            // end_point = p[0]+2*t[i]*ab+t[i]*t[i]*br;
+            end_point, a, b: Vector2;
+            end_point.x = e.start.x + 2*t*ab.x + t*t*br.x;
+            end_point.y = e.start.y + 2*t*ab.y + t*t*br.y;
+
+            a = e.end - e.start;
+            b = end_point - origin;
+            distance := xx nonzero_sign(cross(a, b))*length(b);
+            if abs(distance) <= abs(min_distance) {
+                min_distance = distance;
+                param = t;
+            }
+        }
+    }
+
+    if param >= 0 && param <= 1 {
+        return .{min_distance, 0}, param;
+    }
+
+    ab = normalize(ab);
+    qa = normalize(qa);
+    aa := e.end - e.control;
+    aa = normalize(aa);
+    bb := e.end - origin;
+    bb = normalize(bb);
+
+    if param < 0.5 {
+        return .{min_distance, abs(dot(ab, qa))}, param;
+    } else {
+        return .{min_distance, abs(dot(aa, bb))}, param;
+    }
+}
+
+// cubic edge signed distance
+cubic_dist :: (e: Edge_Segment, origin: Vector2) -> Signed_Distance, param:float {
+    qa, ab, br, as: Vector2;
+    qa = e.start - origin;
+    ab = e.control - e.start;
+    // br.x = e.control1.x - e.control.x - ab.x;
+    // br.y = e.control1.y - e.control.y - ab.y;
+    br = e.control1 - e.control - ab;
+    // as.x = (e.end.x - e.control1.x) - (e.control1.x - e.control.x) - br.x;
+    // as.y = (e.end.y - e.control1.y) - (e.control1.y - e.control.y) - br.y;
+    as = (e.end - e.control1) - (e.control1 - e.control) - br;
+
+    ep_dir := direction(e, 0);
+
+    // distance from a
+    min_distance := xx nonzero_sign(cross(ep_dir, qa))*length(qa);
+    param := -dot(qa, ep_dir) / dot(ep_dir, ep_dir);
+    {
+        a := e.end - origin;
+        ep_dir = direction(e, 1);
+        // distance from b
+        distance := xx nonzero_sign(cross(ep_dir, a))*length(a);
+        if abs(distance) < abs(min_distance) {
+            min_distance = distance;
+
+            a = origin + ep_dir - e.end;
+            param = dot(a, ep_dir) / dot(ep_dir, ep_dir);
+        }
+    }
+
+    SEARCH_STARTS :: 4;
+    for i: 0..SEARCH_STARTS - 1 {
+        t :float = cast(float)i / cast(float)SEARCH_STARTS;
+        step := 0;
+        while 1 {
+            defer step += 1;
+            qpt := point(e, t);
+            qpt = qpt - origin;
+            d := direction(e, t);
+            distance := xx nonzero_sign(cross(d, qpt))*length(qpt);
+            if abs(distance) < abs(min_distance) {
+                min_distance = distance;
+                param = t;
+            }
+            if step == SEARCH_STARTS break;
+
+            d1, d2: Vector2;
+            d1.x = 3*as.x*t*t + 6*br.x*t + 3*ab.x;
+            d1.y = 3*as.y*t*t + 6*br.y*t + 3*ab.y;
+            d2.x = 6*as.x*t + 6*br.x;
+            d2.y = 6*as.y*t + 6*br.y;
+
+            t -= dot(qpt, d1) / (dot(d1, d1) + dot(qpt, d2));
+            if t < 0 || t > 1 break;
+        }
+    }
+
+    if param >= 0 && param <= 1 {
+        return .{min_distance, 0}, param;
+    }
+
+    d0 := direction(e, 0);
+    d1 := direction(e, 1);
+    d0 = normalize(d0);
+    d1 = normalize(d1);
+    qa = normalize(qa);
+    a := e.end - origin;
+    a = normalize(a);
+
+    if param < 0.5 {
+        return .{min_distance, abs(dot(d0, qa))}, param;
+    } else {
+        return .{min_distance, abs(dot(d1, a))}, param;
+    }
+}
+
+dist_to_pseudo :: (distance: *Signed_Distance, origin: Vector2, param: float, e: Edge_Segment) {
+    if param < 0 {
+        dir := direction(e, 0);
+        dir  = normalize(dir);
+        p   := point(e, 0);
+        aq  := origin - p;
+        ts  := dot(aq, dir);
+        if ts < 0 {
+            pseudo_dist := cross(aq, dir);
+            if abs(pseudo_dist) <= abs(distance.dist) {
+                distance.dist = pseudo_dist;
+                distance.d    = 0;
+            }
+        }
+    } else if param > 1 {
+        dir := direction(e, 1);
+        dir  = normalize(dir);
+        p   := point(e, 1);
+        bq  := origin - p;
+        ts  := dot(bq, dir);
+        if ts > 0 {
+            pseudo_dist := cross(bq, dir);
+            if abs(pseudo_dist) <= abs(distance.dist) {
+                distance.dist = pseudo_dist;
+                distance.d    = 0;
+            }
+        }
+    }
+}
+
+signed_compare :: (a: Signed_Distance, b: Signed_Distance) -> bool {
+    return abs(a.dist) < abs(b.dist) || (abs(a.dist) == abs(b.dist) && a.d < b.d);
+}
+
+is_corner :: (a: Vector2, b: Vector2, threshold: float) -> bool {
+    return dot(a, b) <= 0 || abs(cross(a, b)) > threshold;
+}
+
+switch_color :: (color: *Edge_Segment.Color, seed: *u64, banned: Edge_Segment.Color) {
+    combined := color.* & banned;
+    if combined == .RED || combined == .GREEN || combined == .BLUE {
+        color.* = combined ^ .WHITE;
+        return;
+    }
+
+    if color.* == .BLACK || color.* == .WHITE {
+        start :: Edge_Segment.Color.[.CYAN, .MAGENTA, .YELLOW];
+        color.* = start[seed.* & 3];
+        seed.* /= 3;
+        return;
+    }
+
+    shifted := color.* << (1+(seed.* & 1));
+    color.* = (shifted|shifted>>3)&.WHITE;
+    seed.* >>= 1;
 }
 
 #import "stb_truetype";

@@ -4,6 +4,267 @@
 // Capital snake case, e.g. bar_t to Bar
 //
 // All floating point number are in float32 only. No double precision is used.
+//
+// Thanks to the operator overloading in Jai, the vector math is a lot cleaner.
+
+MSDF_Metrics :: struct {
+    // We don't care about advance and left_bearing if HarfBuzz is used
+    ix0, ix1, iy0, iy1: s32;
+}
+
+generate_msdf :: (font: *stbtt_fontinfo, codepoint: s32, w: s64, h: s64) -> bool, metrics:MSDF_Metrics, bitmap:[]float {
+    metrics: MSDF_Metrics;
+    bitmap := NewArray(3*w*h, float);
+
+    scale := stbtt_ScaleForMappingEmToPixels(font, xx h);
+
+    ix0, iy0, ix1, iy1: s32;
+    xoff := 0.5;
+    yoff := 0.5;
+
+    glyph_index := stbtt_FindGlyphIndex(font, codepoint);
+    stbtt_GetGlyphBox(font, glyph_index, *ix0, *iy0, *ix1, *iy1);
+
+    // TODO: implement autofit here
+
+    left_bearing, advance: s32;
+    stbtt_GetGlyphHMetrics(font, glyph_index, *advance, *left_bearing);
+    left_bearing = xx (cast(float)left_bearing*scale);
+
+    translate_x := (w/2) - (xx (ix1 - ix0)*scale)/2 - left_bearing;
+    translate_y := (h/2) - (xx (iy1 - iy0)*scale)/2 - iy0*scale;
+
+    metrics.ix0 = xx (cast(float)ix0*scale);
+    metrics.ix1 = xx (cast(float)ix1*scale);
+    metrics.iy0 = xx (cast(float)iy0*scale);
+    metrics.iy1 = xx (cast(float)iy1*scale);
+
+    verts := get_glyph_shape(font, glyph_index);
+
+    contours := verts_to_contours(verts);
+
+    // Passing an array should be fine if we are not resizing the contours
+    calculate_edge_colors(contours);
+
+    // normalize shape
+    for * contour: contours {
+        if contour.edges.count == 1 {
+            parts: [3]Edge_Segment;
+            parts[0], parts[1], parts[2] = edge_split(contour.edges[0]);
+            array_free(contour.edges);
+            contour.edges = array_copy(parts);
+        }
+    }
+
+    // calculate windings
+    windings := NewArray(contours.count, s32);
+    for contour: contours {
+        if contour.edges.count == 0 {
+            windings[it_index] = 0;
+            continue;
+        }
+
+        total: float;
+
+        if contour.edges.count == 1 {
+            a := point(contour.edges[0], 0);
+            b := point(contour.edges[0], 1.0/3.0);
+            c := point(contour.edges[0], 2.0/3.0);
+            total += shoelace(a, b);
+            total += shoelace(b, c);
+            total += shoelace(c, a);
+        } else if contour.edges.count == 2 {
+            a := point(contour.edges[0], 0);
+            b := point(contour.edges[0], 0.5);
+            c := point(contour.edges[1], 0);
+            d := point(contour.edges[1], 0.5);
+            total += shoelace(a, b);
+            total += shoelace(b, c);
+            total += shoelace(c, d);
+            total += shoelace(d, a);
+        } else {
+            prev := point(peek(contour.edges), 0);
+            for edge: contour.edges {
+                cur := point(edge, 0);
+                total += shoelace(prev, cur);
+                prev = cur;
+            }
+        }
+        windings[it_index] = (cast(s32)(0 < total) - cast(s32)(total < 0));
+    }
+
+    contour_sd := NewArray(contours.count, Multi_Distance);
+    for y: 0..h - 1 {
+        row := ifx iy0 > iy1 then y else h-y-1;
+        for x: 0..w - 1 {
+            p := Vector2.{
+                (x+xoff-translate_x)/(scale*64.0),
+                (y+yoff-translate_y)/(scale*64.0)
+            };
+
+            sr, sg, sb: Edge_Point;
+            sr.min_distance = .{INF, 1};
+            sg.min_distance = .{INF, 1};
+            sb.min_distance = .{INF, 1};
+
+            d := abs(INF);
+            neg_dist := -INF;
+            pos_dist :=  INF;
+            winding  := 0;
+
+            for contour, j: contours {
+                r, g, b: Edge_Point;
+                r.min_distance = .{INF, 1};
+                g.min_distance = .{INF, 1};
+                b.min_distance = .{INF, 1};
+
+
+                for edge: contour.edges {
+                    param: float;
+                    distance := Signed_Distance.{
+                        INF, 1
+                    };
+
+                    // calcuate signed distance
+                    if edge.type == {
+                    case .vline;
+                        distance, param = linear_dist(edge, p);
+                    case .vcurve;
+                        distance, param = quadratic_dist(edge, p);
+                    case .vcubic;
+                        distance, param = cubic_dist(edge, p);
+                    }
+
+                    if edge.color&.RED && signed_compare(distance, r.min_distance) {
+                        r.min_distance = distance;
+                        r.near_edge    = edge;
+                        r.near_param   = param;
+                    }
+                    if edge.color&.GREEN && signed_compare(distance, g.min_distance) {
+                        g.min_distance = distance;
+                        g.near_edge    = edge;
+                        g.near_param   = param;
+                    }
+                    if edge.color&.BLUE && signed_compare(distance, b.min_distance) {
+                        b.min_distance = distance;
+                        b.near_edge    = edge;
+                        b.near_param   = param;
+                    }
+                }
+
+                if signed_compare(r.min_distance, sr.min_distance) {
+                    sr = r;
+                }
+                if signed_compare(g.min_distance, sg.min_distance) {
+                    sg = g;
+                }
+                if signed_compare(b.min_distance, sb.min_distance) {
+                    sb = b;
+                }
+
+                med_min_dist := abs(median(r.min_distance.dist, g.min_distance.dist, b.min_distance.dist));
+
+                if med_min_dist < d {
+                    d = med_min_dist;
+                    winding = -windings[j];
+                }
+
+                dist_to_pseudo(*r.min_distance, p, r.near_param, r.near_edge);
+                dist_to_pseudo(*g.min_distance, p, g.near_param, g.near_edge);
+                dist_to_pseudo(*b.min_distance, p, b.near_param, b.near_edge);
+
+                med_min_dist = median(r.min_distance.dist, g.min_distance.dist, b.min_distance.dist);
+                contour_sd[j].r = r.min_distance.dist;
+                contour_sd[j].g = g.min_distance.dist;
+                contour_sd[j].b = b.min_distance.dist;
+                contour_sd[j].med = med_min_dist;
+
+                if windings[j] > 0 && med_min_dist >= 0 && abs(med_min_dist) < abs(pos_dist) {
+                    pos_dist = med_min_dist;
+                }
+                if windings[j] < 0 && med_min_dist <= 0 && abs(med_min_dist) < abs(neg_dist) {
+                    neg_dist = med_min_dist;
+                }
+            }
+
+            dist_to_pseudo(*sr.min_distance, p, sr.near_param, sr.near_edge);
+            dist_to_pseudo(*sg.min_distance, p, sg.near_param, sg.near_edge);
+            dist_to_pseudo(*sb.min_distance, p, sb.near_param, sb.near_edge);
+
+            msd := Multi_Distance.{
+                r = INF,
+                g = INF,
+                b = INF,
+                med = INF
+            };
+            if pos_dist >= 0 && abs(pos_dist) <= abs(neg_dist) {
+                msd.med = INF;
+                winding = 1;
+                for i: 0..contours.count - 1 {
+                    if windings[i] > 0 && contour_sd[i].med > msd.med && abs(contour_sd[i].med) < abs(neg_dist) {
+                        msd = contour_sd[i];
+                    }
+                }
+            } else if neg_dist <= 0 && abs(neg_dist) <= abs(pos_dist) {
+                msd.med = -INF;
+                winding = -1;
+                for i: 0..contours.count - 1 {
+                    if windings[i] < 0 && contour_sd[i].med < msd.med && abs(contour_sd[i].med) < abs(pos_dist) {
+                        msd = contour_sd[i];
+                    }
+                }
+            }
+
+            for i: 0..contours.count - 1 {
+                if windings[i] != winding && abs(contour_sd[i].med) < abs(msd.med) {
+                    msd = contour_sd[i];
+                }
+            }
+
+            if median(sr.min_distance.dist, sg.min_distance.dist, sb.min_distance.dist) == msd.med {
+                msd.r = sr.min_distance.dist;
+                msd.g = sg.min_distance.dist;
+                msd.b = sb.min_distance.dist;
+            }
+
+            index := 3*((row*w)+x);
+            bitmap[index  ] = msd.r/RANGE+0.5;
+            bitmap[index+1] = msd.g/RANGE+0.5;
+            bitmap[index+2] = msd.b/RANGE+0.5;
+        }
+    }
+
+    // TODO: free all the resources here, maybe I should use defer earlier
+
+    // msdf error correction
+    clashes: [..]Clashes;
+    tx := EDGE_THRESHOLD/(scale*RANGE);
+    ty := EDGE_THRESHOLD/(scale*RANGE);
+
+    for y: 0..h - 1 {
+        for x: 0..w - 1 {
+            p := pixel_at(x, y, w, bitmap);
+            if (x > 0   && pixel_clash(p, pixel_at(max(x-1, 0), y, w, bitmap), tx)) ||
+               (x < w-1 && pixel_clash(p, pixel_at(min(x+1, w-1), y, w, bitmap), tx)) ||
+               (y > 0   && pixel_clash(p, pixel_at(x, max(y-1, 0), w, bitmap), ty)) ||
+               (y < h-1 && pixel_clash(p, pixel_at(x, min(y+1, h-1), w, bitmap), ty)) {
+                c := Clashes.{x = x};
+                array_add(*clashes, Clashes.{x = x});
+                array_add(*clashes, Clashes.{y = y});
+            }
+        }
+    }
+
+    for clash: clashes {
+        index := 3*((clash.y*w)+clash.x);
+        med := median(bitmap[index], bitmap[index+1], bitmap[index+2]);
+        bitmap[index  ] = med;
+        bitmap[index+1] = med;
+        bitmap[index+2] = med;
+    }
+
+    return true, metrics, bitmap;
+}
 
 #scope_file
 INF :: -1.0e24;
@@ -16,7 +277,7 @@ Signed_Distance :: struct {
 }
 
 Edge_Segment :: struct {
-    Color :: enum {
+    Color :: enum s32 {
         BLACK   :: 0;
         RED     :: 1;
         GREEN   :: 2;
@@ -38,6 +299,26 @@ Edge_Segment :: struct {
     control:  Vector2;
     control1: Vector2;
     type:     STBTT;
+}
+
+// We can make Contour just be an array of Edge_Segment, but that is confusing in code.
+Contour :: struct {
+    edges: []Edge_Segment;
+};
+
+Multi_Distance :: struct {
+    r, g, b: float;
+    med: float;
+}
+
+Edge_Point :: struct {
+    min_distance: Signed_Distance;
+    near_edge:    Edge_Segment;
+    near_param:   float;
+}
+
+Clashes :: struct {
+    x, y: s64;
 }
 
 median :: (a: float, b: float, c: float) -> float {
@@ -520,27 +801,352 @@ signed_compare :: (a: Signed_Distance, b: Signed_Distance) -> bool {
     return abs(a.dist) < abs(b.dist) || (abs(a.dist) == abs(b.dist) && a.d < b.d);
 }
 
+// I am not sure whether this version is better than dealing with a lot of pointers
+linear_split :: (e: Edge_Segment) -> p1:Edge_Segment, p2:Edge_Segment, p3:Edge_Segment {
+    p1, p2, p3: Edge_Segment;
+
+    // TODO: The type of Edge_Segment is not set here, I am not sure
+    // whether that is intended.
+    p: Vector2;
+
+    p = point(e, 1.0/3.0);
+    p1.start = e.start;
+    p1.end = p;
+    p1.color = e.color;
+
+    // This is repeated
+    // p = point(e, 1.0/3.0);
+    p2.start = p;
+    p = point(e, 2.0/3.0);
+    p2.end = p;
+    p2.color = e.color;
+
+    p3.start = p;
+    p3.end = e.end;
+    p3.color = e.color;
+
+    return p1, p2, p3;
+}
+
+quadratic_split :: (e: Edge_Segment) -> p1:Edge_Segment, p2:Edge_Segment, p3:Edge_Segment {
+    p1, p2, p3: Edge_Segment;
+
+    p, a, b: Vector2;
+
+    p1.start = e.start;
+    p = mix(e.start, e.control, 1.0/3.0);
+    p1.control = p;
+    p = point(e, 1.0/3.0);
+    p1.end = p;
+    p1.color = e.color;
+
+    p2.start = p;
+    a = mix(e.start, e.control, 5.0/9.0);
+    b = mix(e.control, e.end, 4.0/9.0);
+    p = mix(a, b, 0.5);
+    p2.control = p;
+    p = point(e, 2.0/3.0);
+    p2.end = p;
+    p2.color = e.color;
+
+    p3.start = p;
+    p = mix(e.control, e.end, 2.0/3.0);
+    p3.control = p;
+    p3.end = e.end;
+    p3.color = e.color;
+
+    return p1, p2, p3;
+}
+
+cubic_split :: (e: Edge_Segment) -> p1:Edge_Segment, p2:Edge_Segment, p3:Edge_Segment {
+    p1, p2, p3: Edge_Segment;
+
+    p, a, b, c, d: Vector2;
+
+    p1.start = e.start;
+    if e.start == e.control {
+        p1.control = e.start;
+    } else {
+        p = mix(e.start, e.control, 1.0/3.0);
+        p1.control = p;
+    }
+    a = mix(e.start, e.control, 1.0/3.0);
+    b = mix(e.control, e.control1, 1.0/3.0);
+    p = mix(a, b, 1.0/3.0);
+    p1.control1 = p;
+    p = point(e, 1.0/3.0);
+    p1.end = p;
+    p1.color = e.color;
+
+    p2.start = p;
+    a = mix(e.start,   e.control,  1.0/3.0);
+    b = mix(e.control, e.control1, 1.0/3.0);
+    c = mix(a, b, 1.0/3.0);
+    // a = mix(e.control, e.control1, 1.0/3.0);
+    a = b;
+    b = mix(e.control1, e.end, 1.0/3.0);
+    d = mix(a, b, 1.0/3.0);
+    p = mix(c, d, 2.0/3.0);
+    p2.control = p;
+    a = mix(e.start, e.control, 2.0/3.0);
+    b = mix(e.control, e.control1, 2.0/3.0);
+    c = mix(a, b, 2.0/3.0);
+    // a = mix(e.control, e.control1, 2.0/3.0);
+    a = b;
+    b = mix(e.control1, e.end, 2.0/3.0);
+    d = mix(a, b, 2.0/3.0);
+    p = mix(c, d, 1.0/3.0);
+    p2.control1 = p;
+    p = point(e, 2.0/3.0);
+    p2.end = p;
+    p2.color = e.color;
+
+    p3.start = p;
+    a = mix(e.control, e.control1, 2.0/3.0);
+    b = mix(e.control1, e.end, 2.0/3.0);
+    p = mix(a, b, 2.0/3.0);
+    p3.control = p;
+
+    if e.control1 == e.end {
+        p3.control1 = e.end;
+    } else {
+        // p = mix(e.control1, e.end, 2.0/3.0); // This is b
+        p = b;
+        p3.control1 = p;
+    }
+
+    p3.end = e.end;
+
+    return p1, p2, p3;
+}
+
+edge_split :: (e: Edge_Segment) -> p1:Edge_Segment, p2:Edge_Segment, p3:Edge_Segment {
+    p1, p2, p3: Edge_Segment;
+    if e.type == {
+    case .vline;
+        p1, p2, p3 = linear_split(e);
+    case .vcurve;
+        p1, p2, p3 = quadratic_split(e);
+    case .vcubic;
+        p1, p2, p3 = cubic_split(e);
+    }
+
+    return p1, p2, p3;
+}
+
+shoelace :: (a: Vector2, b: Vector2) -> float {
+    return (b.x-a.x)*(a.y+b.y);
+}
+
+get_glyph_shape :: (info: *stbtt_fontinfo, glyph_index: s32) -> [] stbtt_vertex {
+    vertices: [] stbtt_vertex;
+    vertices.count = xx stbtt_GetGlyphShape(info, glyph_index, *vertices.data);
+
+    return vertices;
+}
+
+verts_to_contours :: (verts: []stbtt_vertex) -> []Contour {
+    contours: [..]Contour;
+
+    CSCALE :: 64.0; // Where does this number come from?
+
+    initial: Vector2; // Assume the first vertex is vmove, I don't check here
+    edges: [..]Edge_Segment;
+    for v: verts {
+        e := Edge_Segment.{color = .WHITE};
+        if cast(STBTT) v.type == {
+        case .vmove;
+            if edges.count > 0 {
+                new_contour := Contour.{
+                    edges = array_copy(edges)
+                };
+                array_add(*contours, new_contour);
+                array_reset_keeping_memory(*edges);
+            }
+            initial = .{xx v.x, xx v.y};
+            initial /= CSCALE;
+
+        case .vline;
+            e.type = .vline;
+            e.start = initial;
+            e.end = .{xx v.x, xx v.y};
+            e.end /= CSCALE;
+
+            initial = e.end;
+            array_add(*edges, e);
+
+        case .vcurve;
+            e.type = .vcurve;
+            e.start = initial;
+            e.control = .{xx v.cx, xx v.cy};
+            e.control /= CSCALE;
+            e.end = .{xx v.x, xx v.y};
+            e.end /= CSCALE;
+
+            if (e.start == e.control) || (e.control == e.end) {
+                e.control = 0.5*(e.start + e.end);
+            }
+
+            initial = e.end;
+            array_add(*edges, e);
+
+        case .vcubic;
+            e.type = .vcubic;
+            e.start = initial;
+            e.control = .{xx v.cx, xx v.cy};
+            e.control /= CSCALE;
+            e.control1 = .{xx v.cx1, xx v.cy1};
+            e.control1 /= CSCALE;
+            e.end = .{xx v.x, xx v.y};
+            e.end /= CSCALE;
+
+            initial = e.end;
+            array_add(*edges, e);
+        }
+    }
+
+    // Here we add the last contour
+    if edges.count > 0 {
+        new_contour := Contour.{
+            edges = array_copy(edges)
+        };
+        array_add(*contours, new_contour);
+    }
+
+    array_free(edges);
+
+    return contours;
+}
+
+// edge coloring related
+symmetrical_trichotomy :: (position: s64, n: s64) -> s64 {
+    return cast(s64) (3.0+2.875*cast(float)position/cast(float)(n-1)-1.4375+0.5) - 3;
+}
+
 is_corner :: (a: Vector2, b: Vector2, threshold: float) -> bool {
     return dot(a, b) <= 0 || abs(cross(a, b)) > threshold;
+}
+
+seed_extract_2 :: (seed: *u64) -> s32 {
+    v: s32 = cast(s32)(seed.*) & 1;
+    seed.* >>= 1;
+    return v;
+}
+
+seed_extract_3 :: (seed: *u64) -> s32 {
+    v: s32 = cast(s32)(seed.* % 3);
+    seed.* /= 3;
+    return v;
+}
+
+init_color :: (seed: *u64) -> Edge_Segment.Color {
+    colors: [3]Edge_Segment.Color = .[.CYAN, .MAGENTA, .YELLOW];
+    return colors[seed_extract_3(seed)];
+}
+
+switch_color :: (color: *Edge_Segment.Color, seed: *u64) {
+    shifted := cast(Edge_Segment.Color)(color.* << (1+seed_extract_2(seed)));
+    color.* = (shifted|shifted>>3)&.WHITE;
 }
 
 switch_color :: (color: *Edge_Segment.Color, seed: *u64, banned: Edge_Segment.Color) {
     combined := color.* & banned;
     if combined == .RED || combined == .GREEN || combined == .BLUE {
         color.* = combined ^ .WHITE;
-        return;
+    } else {
+        switch_color(color, seed);
     }
+}
 
-    if color.* == .BLACK || color.* == .WHITE {
-        start :: Edge_Segment.Color.[.CYAN, .MAGENTA, .YELLOW];
-        color.* = start[seed.* & 3];
-        seed.* /= 3;
-        return;
+calculate_edge_colors :: (contours: []Contour, angle_threshold: float = 3.0) {
+    seed: u64;
+    cross_threshold := sin(angle_threshold);
+    color := init_color(*seed);
+
+    corners: [..]s32;
+    for * contour: contours {
+        if contour.edges.count == 0 continue;
+        { // Identify corners
+            array_reset_keeping_memory(*corners);
+            prev_direction := direction(peek(contour.edges), 1);
+
+            for edge, index: contour.edges {
+                if is_corner(normalize(prev_direction), normalize(direction(edge, 0)), cross_threshold) {
+                    array_add(*corners, xx index);
+                }
+                prev_direction = direction(edge, 1);
+            }
+        }
+
+        if corners.count == 0 {
+            // Smooth contour
+            switch_color(*color, *seed);
+            for * edge: contour.edges {
+                edge.color = color;
+            }
+        } else if corners.count == 1 {
+            colors: [3]Edge_Segment.Color;
+            switch_color(*color, *seed);
+            colors[0] = color;
+            colors[1] = .WHITE;
+            switch_color(*color, *seed);
+            colors[2] = color;
+            corner := corners[0];
+            if contour.edges.count >= 3 {
+                m := cast(s32)contour.edges.count;
+                for i: 0..m - 1 {
+                    contour.edges[(corner+i)%m].color = colors[1+symmetrical_trichotomy(i, m)];
+                }
+            } else if contour.edges.count >= 1 {
+                // Less than three edge segments for three colors => edges must be split
+
+                // This part is partially rewritten to fit what I
+                // usually in Jai, since we are not using any pointer
+                // magic but simple struct passing around, we have to
+                // keep track of how many parts we operating instead
+                // of the original way of checking NULL.
+                parts: [6]Edge_Segment;
+                part_count: s64;
+                parts[0+3*corner], parts[1+3*corner], parts[2+3*corner] = edge_split(contour.edges[0]);
+                if contour.edges.count >= 2 {
+                    parts[3-3*corner], parts[4-3*corner], parts[5-3*corner] = edge_split(contour.edges[1]);
+                    parts[0].color = colors[0];
+                    parts[1].color = colors[0];
+                    parts[2].color = colors[1];
+                    parts[3].color = colors[1];
+                    parts[4].color = colors[2];
+                    parts[5].color = colors[2];
+                } else {
+                    parts[0].color = colors[0];
+                    parts[1].color = colors[1];
+                    parts[2].color = colors[2];
+                }
+                // TODO: This should do the same
+                array_free(contour.edges);
+                contour.edges = array_copy(array_view(parts, part_count));
+            } else {
+                // Multiple corners
+                corner_count := corners.count;
+                spline := 0;
+                start := corners[0];
+                m := contour.edges.count;
+                switch_color(*color, *seed);
+                initial_color := color;
+                for i: 0..m - 1 {
+                    index := (start+i)%m;
+                    if spline+1 < corner_count && corners[spline+1] == index {
+                        spline += 1;
+                        switch_color(*color, *seed, cast(Edge_Segment.Color)(spline == corner_count-1)*initial_color);
+                    }
+                    contour.edges[index].color = color;
+                }
+            }
+        }
     }
+}
 
-    shifted := color.* << (1+(seed.* & 1));
-    color.* = (shifted|shifted>>3)&.WHITE;
-    seed.* >>= 1;
+pixel_at :: (x: s64, y: s64, w: s64, bitmap: []float) -> Vector3 {
+    return Vector3.{bitmap[3*((y*w)+x)], bitmap[3*((y*w)+x)+1], bitmap[3*((y*w)+x)+2]};
 }
 
 #import "stb_truetype";

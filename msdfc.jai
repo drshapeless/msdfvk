@@ -25,7 +25,20 @@ generate_msdf :: (font: *stbtt_fontinfo, codepoint: s32, w: s64, h: s64) -> bool
     glyph_index := stbtt_FindGlyphIndex(font, codepoint);
     stbtt_GetGlyphBox(font, glyph_index, *ix0, *iy0, *ix1, *iy1);
 
-    // TODO: implement autofit here
+    // Always autofit
+    {
+        // calculate new height
+        newh := h + (h - (iy1 - iy0) * scale) - 4;
+        // calculate new scale
+        // see 'stbtt_ScaleForMappingEmToPixels' in stb_truetype.h
+        p := font.data + font.head + 18;
+        units_per_em := p[0] * 256 + p[1];
+        scale = newh / units_per_em;
+
+        // make sure we are centered
+        xoff = 0;
+        yoff = 0;
+    }
 
     left_bearing, advance: s32;
     stbtt_GetGlyphHMetrics(font, glyph_index, *advance, *left_bearing);
@@ -43,8 +56,17 @@ generate_msdf :: (font: *stbtt_fontinfo, codepoint: s32, w: s64, h: s64) -> bool
 
     contours := verts_to_contours(verts);
 
+    log("contour count: %", contours.count);
+
     // Passing an array should be fine if we are not resizing the contours
     calculate_edge_colors(contours);
+
+    for contours {
+        log("contour %: edge count: %", it_index, it.edges.count);
+        for it.edges {
+            log("edge %: %", it_index, it);
+        }
+    }
 
     // normalize shape
     for * contour: contours {
@@ -91,6 +113,10 @@ generate_msdf :: (font: *stbtt_fontinfo, codepoint: s32, w: s64, h: s64) -> bool
             }
         }
         windings[it_index] = (cast(s32)(0 < total) - cast(s32)(total < 0));
+    }
+
+    for windings {
+        log("winding %: %", it_index, it);
     }
 
     contour_sd := NewArray(contours.count, Multi_Distance);
@@ -1062,6 +1088,7 @@ calculate_edge_colors :: (contours: []Contour, angle_threshold: float = 3.0) {
     seed: u64;
     cross_threshold := sin(angle_threshold);
     color := init_color(*seed);
+    log("init color: %", color);
 
     corners: [..]s32;
     for * contour: contours {
@@ -1077,6 +1104,8 @@ calculate_edge_colors :: (contours: []Contour, angle_threshold: float = 3.0) {
                 prev_direction = direction(edge, 1);
             }
         }
+
+        log("corners.count: %", corners.count);
 
         if corners.count == 0 {
             // Smooth contour
@@ -1124,22 +1153,25 @@ calculate_edge_colors :: (contours: []Contour, angle_threshold: float = 3.0) {
                 // TODO: This should do the same
                 array_free(contour.edges);
                 contour.edges = array_copy(array_view(parts, part_count));
-            } else {
-                // Multiple corners
-                corner_count := corners.count;
-                spline := 0;
-                start := corners[0];
-                m := contour.edges.count;
-                switch_color(*color, *seed);
-                initial_color := color;
-                for i: 0..m - 1 {
-                    index := (start+i)%m;
-                    if spline+1 < corner_count && corners[spline+1] == index {
-                        spline += 1;
-                        switch_color(*color, *seed, cast(Edge_Segment.Color)(spline == corner_count-1)*initial_color);
-                    }
-                    contour.edges[index].color = color;
+            }
+        } else {
+            // Multiple corners
+            corner_count := corners.count;
+            spline := 0;
+            start := corners[0];
+            m := contour.edges.count;
+            // switch_color(*color, *seed);
+            initial_color := color;
+            log("initial color: %", initial_color);
+            for i: 0..m - 1 {
+                index := (start+i)%m;
+                if spline+1 < corner_count && corners[spline+1] == index {
+                    spline += 1;
+                    switch_color(*color, *seed, cast(Edge_Segment.Color)(spline == corner_count-1)*initial_color);
                 }
+
+                log("setting edge % to color %", index, color);
+                contour.edges[index].color = color;
             }
         }
     }

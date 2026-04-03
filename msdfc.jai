@@ -12,7 +12,7 @@ MSDF_Metrics :: struct {
     ix0, ix1, iy0, iy1: s32;
 }
 
-generate_msdf :: (font: *stbtt_fontinfo, codepoint: s32, w: s64, h: s64) -> bool, metrics:MSDF_Metrics, bitmap:[]float {
+generate_msdf :: (font: *stbtt_fontinfo, glyph_index: s32, w: s64, h: s64, autofit := true) -> bool, metrics:MSDF_Metrics, bitmap:[]float {
     metrics: MSDF_Metrics;
     bitmap := NewArray(3*w*h, float);
 
@@ -22,11 +22,9 @@ generate_msdf :: (font: *stbtt_fontinfo, codepoint: s32, w: s64, h: s64) -> bool
     xoff := 0.5;
     yoff := 0.5;
 
-    glyph_index := stbtt_FindGlyphIndex(font, codepoint);
     stbtt_GetGlyphBox(font, glyph_index, *ix0, *iy0, *ix1, *iy1);
 
-    // Always autofit
-    {
+    if autofit {
         // calculate new height
         newh := h + (h - (iy1 - iy0) * scale) - 4;
         // calculate new scale
@@ -54,10 +52,10 @@ generate_msdf :: (font: *stbtt_fontinfo, codepoint: s32, w: s64, h: s64) -> bool
 
     verts := get_glyph_shape(font, glyph_index);
 
-    contours := verts_to_contours(verts);
+    contours := verts_to_contours(verts,, temp);
 
     // Passing an array should be fine if we are not resizing the contours
-    color_edges(contours);
+    color_edges(contours,, temp);
 
     // normalize shape
     for * contour: contours {
@@ -70,7 +68,7 @@ generate_msdf :: (font: *stbtt_fontinfo, codepoint: s32, w: s64, h: s64) -> bool
     }
 
     // calculate windings
-    windings := NewArray(contours.count, s32);
+    windings := NewArray(contours.count, s32,, temp);
     for contour: contours {
         if contour.edges.count == 0 {
             windings[it_index] = 0;
@@ -106,7 +104,7 @@ generate_msdf :: (font: *stbtt_fontinfo, codepoint: s32, w: s64, h: s64) -> bool
         windings[it_index] = (cast(s32)(0 < total) - cast(s32)(total < 0));
     }
 
-    contour_sd := NewArray(contours.count, Multi_Distance);
+    contour_sd := NewArray(contours.count, Multi_Distance,, temp);
     for y: 0..h - 1 {
         row := ifx iy0 > iy1 then y else h-y-1;
         for x: 0..w - 1 {
@@ -247,10 +245,9 @@ generate_msdf :: (font: *stbtt_fontinfo, codepoint: s32, w: s64, h: s64) -> bool
         }
     }
 
-    // TODO: free all the resources here, maybe I should use defer earlier
-
     // msdf error correction
     clashes: [..]Clashes;
+    clashes.allocator = temp;
     tx := EDGE_THRESHOLD/(scale*RANGE);
     ty := EDGE_THRESHOLD/(scale*RANGE);
 
@@ -275,6 +272,8 @@ generate_msdf :: (font: *stbtt_fontinfo, codepoint: s32, w: s64, h: s64) -> bool
         bitmap[index+1] = med;
         bitmap[index+2] = med;
     }
+
+    reset_temporary_storage();
 
     return true, metrics, bitmap;
 }

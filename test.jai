@@ -12,7 +12,7 @@ main :: () {
     scale := stbtt_ScaleForPixelHeight(*font, xx size_sdf);
     baseline := cast(s32)(cast(float)ascent*scale);
 
-    success, metrics, msdf := generate_msdf(*font, #char "F", size_sdf, size_sdf);
+    success, metrics, msdf := generate_msdf(*font, stbtt_FindGlyphIndex(*font, #char "F"), size_sdf, size_sdf);
     if !success log("Fuck");
 
     bitmap_sdf := NewArray(3*size_sdf*size_sdf, u8);
@@ -55,6 +55,12 @@ main :: () {
     stbi_write_png("test_msdf.png", xx size_sdf, xx size_sdf, 3, bitmap_sdf.data, xx (size_sdf*3));
     stbi_write_png("test_out.png", xx size_bitmap, xx size_bitmap, 3, bitmap.data, xx (size_bitmap*3));
 
+    free(data);
+    array_free(msdf);
+    array_free(bitmap_sdf);
+    array_free(bitmap);
+
+    report_memory_leaks();
 }
 
 calc_index :: (x: s64, y: s64, size: s64, num_channels: s64) -> s64 {
@@ -71,7 +77,7 @@ median :: (r: float, g: float, b: float) -> float {
     return max(min(r, g), min(max(r, g), b));
 }
 
-#import "Basic";
+#import "Basic"()(MEMORY_DEBUGGER = true);
 #import "File";
 #import "Math";
 #import "stb_truetype";

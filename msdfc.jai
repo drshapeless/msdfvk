@@ -1039,8 +1039,10 @@ symmetrical_trichotomy :: (position: s64, n: s64) -> s64 {
     return cast(s64) (3.0+2.875*cast(float)position/cast(float)(n-1)-1.4375+0.5) - 3;
 }
 
-// Direct copy from msdf-c
-switch_color :: (color: *Edge_Segment.Color, seed: *u64, banned: Edge_Segment.Color) {
+// After a very long investigation, if we are using zero as the seed,
+// there is no effect on whether we provide seed or not, the seed
+// would always be zero.
+switch_color :: (color: *Edge_Segment.Color, banned: Edge_Segment.Color) {
     combined := color.* & banned;
     if combined == .RED || combined == .GREEN || combined == .BLUE {
         color.* = combined ^ .WHITE;
@@ -1048,21 +1050,16 @@ switch_color :: (color: *Edge_Segment.Color, seed: *u64, banned: Edge_Segment.Co
     }
 
     if color.* == .BLACK || color.* == .WHITE {
-        start := Edge_Segment.Color.[.CYAN, .MAGENTA, .YELLOW];
-        color.* = start[seed.* & 3];
-        seed.* /= 3;
+        color.* = .CYAN;
         return;
     }
 
-
-    shifted := color.* << (1 + (seed.* & 1));
+    shifted := color.* << 1;
     color.* = (shifted | (shifted >> 3)) & .WHITE;
-    seed.* >>= 1;
 }
 
 // The original msdfc is filled with bugs
 color_edges :: (contours: []Contour) {
-    seed :u64 = 0;
     angle_threshold := 3.0;
     cross_threshold := sin(angle_threshold);
     corners: [..]s64;
@@ -1094,14 +1091,16 @@ color_edges :: (contours: []Contour) {
             colors: [3]Edge_Segment.Color;
             colors[0] = .WHITE;
             colors[1] = .WHITE;
-            switch_color(*colors[0], *seed, .BLACK);
+            switch_color(*colors[0], .BLACK);
             colors[2] = colors[0];
-            switch_color(*colors[2], *seed, .BLACK);
+            switch_color(*colors[2], .BLACK);
 
             corner := corners[0];
             if contour.edges.count >= 3 {
                 m := contour.edges.count;
                 for i: 0..m - 1 {
+                    // Here is a bug in msdf-c, it uses the wrong
+                    // iterative number
                     contour.edges[(corner + i) % m].color = colors[1+symmetrical_trichotomy(i, m)];
                 }
             } else if contour.edges.count >= 1 {
@@ -1131,19 +1130,19 @@ color_edges :: (contours: []Contour) {
             start := corners[0];
             m := contour.edges.count;
             color := Edge_Segment.Color.WHITE;
-            switch_color(*color, *seed, .BLACK);
+            switch_color(*color, .BLACK);
             initial_color := color;
             // In the msdf-c code, corner_count is equal to all the
             // edge count combined, with is not the original msdfgen
             // intended way, here we are using an dynamic array, and
             // the color we get is a bit different from what the
-            // msdf-c generated.
+            // msdf-c generated. That is a bug in msdf-c.
             for j: 0..m - 1 {
                 index := (start + j) % m;
                 if spline + 1 < corners.count && corners[spline + 1] == index {
                     spline += 1;
                     s := cast(Edge_Segment.Color)(spline == corners.count - 1) * initial_color;
-                    switch_color(*color, *seed, s);
+                    switch_color(*color, s);
                 }
                 contour.edges[index].color = color;
             }

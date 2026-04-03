@@ -12,3 +12,8 @@ alternative is [[https://github.com/nyyManni/msdfgl][msdfgl]], but that is in Op
 This repo is based on [[https://github.com/solenum/msdf-c][msdf-c]] by solenum. Do not use [[https://github.com/pjako/msdf_c.git][msdf_c]] by pjako,
 that thing does not work. The original msdfgen is filled with object
 oriented code that is a nightmare to read.
+
+* Porting difficulty
+The clamp function in msdf-c is clamp(x, upper, lower), while the one
+in Jai is clamp(x, lower, upper). Making it a ridiculous hard bug to
+track.

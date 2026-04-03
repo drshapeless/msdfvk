@@ -56,17 +56,8 @@ generate_msdf :: (font: *stbtt_fontinfo, codepoint: s32, w: s64, h: s64) -> bool
 
     contours := verts_to_contours(verts);
 
-    log("contour count: %", contours.count);
-
     // Passing an array should be fine if we are not resizing the contours
-    calculate_edge_colors(contours);
-
-    for contours {
-        log("contour %: edge count: %", it_index, it.edges.count);
-        for it.edges {
-            log("edge %: %", it_index, it);
-        }
-    }
+    color_edges(contours);
 
     // normalize shape
     for * contour: contours {
@@ -113,10 +104,6 @@ generate_msdf :: (font: *stbtt_fontinfo, codepoint: s32, w: s64, h: s64) -> bool
             }
         }
         windings[it_index] = (cast(s32)(0 < total) - cast(s32)(total < 0));
-    }
-
-    for windings {
-        log("winding %: %", it_index, it);
     }
 
     contour_sd := NewArray(contours.count, Multi_Distance);
@@ -1049,10 +1036,13 @@ is_corner :: (a: Vector2, b: Vector2, cross_threshold: float) -> bool {
     return dot(a, b) <= 0 || abs(cross(a, b)) > cross_threshold;
 }
 
-// The following is from msdfgl
-switch_color :: (color: *Edge_Segment.Color, seed: *u64, banned: Edge_Segment.Color = .BLACK) {
-    combined := color.* & banned;
+symmetrical_trichotomy :: (position: s64, n: s64) -> s64 {
+    return cast(s64) (3.0+2.875*cast(float)position/cast(float)(n-1)-1.4375+0.5) - 3;
+}
 
+// Direct copy from msdf-c
+switch_color :: (color: *Edge_Segment.Color, seed: *u64, banned: Edge_Segment.Color) {
+    combined := color.* & banned;
     if combined == .RED || combined == .GREEN || combined == .BLUE {
         color.* = combined ^ .WHITE;
         return;
@@ -1060,42 +1050,43 @@ switch_color :: (color: *Edge_Segment.Color, seed: *u64, banned: Edge_Segment.Co
 
     if color.* == .BLACK || color.* == .WHITE {
         start := Edge_Segment.Color.[.CYAN, .MAGENTA, .YELLOW];
-        color.* = start[seed.* % 3];
+        color.* = start[seed.* & 3];
         seed.* /= 3;
         return;
     }
 
+
     shifted := color.* << (1 + (seed.* & 1));
-    color.* = (shifted | shifted >> 3) & .WHITE;
+    color.* = (shifted | (shifted >> 3)) & .WHITE;
     seed.* >>= 1;
 }
 
-symmetrical_trichotomy :: (position: s64, n: s64) -> s64 {
-    return cast(s64) (3.0+2.875*cast(float)position/cast(float)(n-1)-1.4375+0.5) - 3;
-}
-
-calculate_edge_colors :: (contours: []Contour, angle_threshold: float = 3.0) {
-    cross_threshold := sin(angle_threshold);
+// The original msdfc is filled with bugs
+color_edges :: (contours: []Contour) {
     seed :u64 = 0;
-
+    angle_threshold := 3.0;
+    cross_threshold := sin(angle_threshold);
     corners: [..]s64;
-    for contour: contours {
-        array_reset_keeping_memory(*corners);
 
-        if contour.edges.count == 0 continue;
-        prev_direction := direction(peek(contour.edges), 1);
-        for edge, index: contour.edges {
-            cur_direction := direction(edge, 0);
-            new_prev_direction := direction(edge, 1);
+    for * contour: contours {
+        if contour.edges.count > 0 {
+            prev_dir, dir: Vector2;
+            prev_dir = direction(contour.edges[contour.edges.count - 1], 1);
 
-            if is_corner(normalize(prev_direction), normalize(cur_direction), cross_threshold) {
-                array_add(*corners, index);
-                prev_direction = new_prev_direction;
+            index := 0;
+            for edge: contour.edges {
+                dir = direction(edge, 0);
+                dir = normalize(dir);
+                prev_dir = normalize(prev_dir);
+                if is_corner(prev_dir, dir, cross_threshold) {
+                    array_add(*corners, it_index);
+                }
+                prev_dir = direction(edge, 1);
             }
         }
 
         if corners.count == 0 {
-            // Smooth contour
+            // Smooth
             for * edge: contour.edges {
                 edge.color = .WHITE;
             }
@@ -1104,38 +1095,57 @@ calculate_edge_colors :: (contours: []Contour, angle_threshold: float = 3.0) {
             colors: [3]Edge_Segment.Color;
             colors[0] = .WHITE;
             colors[1] = .WHITE;
-            switch_color(*colors[0], *seed);
+            switch_color(*colors[0], *seed, .BLACK);
             colors[2] = colors[0];
-            switch_color(*colors[2], *seed);
+            switch_color(*colors[2], *seed, .BLACK);
 
             corner := corners[0];
             if contour.edges.count >= 3 {
-                // TODO: cleanup. This is messy
-                for contour.edges {
-                    c: Edge_Segment.Color = colors[1 + symmetrical_trichotomy(it_index, contour.edges.count)];
-                    contour.edges[(corner+it_index)%contour.edges.count].color = c;
+                m := contour.edges.count;
+                for i: 0..m - 1 {
+                    contour.edges[(corner + i) % m].color = colors[1+symmetrical_trichotomy(i, m)];
                 }
             } else if contour.edges.count >= 1 {
-                // Split in third
-                assert(false, "Non-supported shape");
+                parts: [6]Edge_Segment;
+                parts[0 + 3 * corner], parts[1 + 3 * corner], parts[2 + 3 * corner] = edge_split(contour.edges[0]);
+                if contour.edges.count >= 2 {
+                    parts[3 - 3 * corner], parts[4 - 3 * corner], parts[5 - 3 * corner] = edge_split(contour.edges[1]);
+                    parts[0].color = colors[0];
+                    parts[1].color = colors[0];
+                    parts[2].color = colors[1];
+                    parts[3].color = colors[1];
+                    parts[4].color = colors[2];
+                    parts[5].color = colors[2];
+                    array_free(contour.edges);
+                    contour.edges = array_copy(array_view(parts, 0, 6));
+                } else {
+                    parts[0].color = colors[0];
+                    parts[1].color = colors[1];
+                    parts[2].color = colors[2];
+                    array_free(contour.edges);
+                    contour.edges = array_copy(array_view(parts, 0, 3));
+                }
             }
         } else {
-            // Multiple corners
+            // Multi-corners
             spline := 0;
             start := corners[0];
             m := contour.edges.count;
             color := Edge_Segment.Color.WHITE;
-            switch_color(*color, *seed);
+            switch_color(*color, *seed, .BLACK);
             initial_color := color;
-            for contour.edges {
-                index := (start + it_index) % m;
-
+            // In the msdf-c code, corner_count is equal to all the
+            // edge count combined, with is not the original msdfgen
+            // intended way, here we are using an dynamic array, and
+            // the color we get is a bit different from what the
+            // msdf-c generated.
+            for j: 0..m - 1 {
+                index := (start + j) % m;
                 if spline + 1 < corners.count && corners[spline + 1] == index {
                     spline += 1;
-                    banned :Edge_Segment.Color = ifx (spline == corners.count - 1) then initial_color else .BLACK;
-                    switch_color(*color, *seed, banned);
+                    s := cast(Edge_Segment.Color)(spline == corners.count - 1) * initial_color;
+                    switch_color(*color, *seed, s);
                 }
-                log("setting edge % to color %", index, color);
                 contour.edges[index].color = color;
             }
         }

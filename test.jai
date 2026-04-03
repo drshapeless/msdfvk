@@ -18,45 +18,45 @@ main :: () {
     log("metrics %", metrics);
     log("msdf count: %", msdf.count);
 
-    // bitmap_sdf := NewArray(3*size_sdf*size_sdf, u8);
-    // for y: 0..size_sdf - 1 {
-    //     for x: 0..size_sdf - 1 {
-    //         index_sdf := calc_index(x, y, size_sdf, 3);
-    //         bitmap_sdf[index_sdf+0] = xx (255*(msdf[index_sdf+0]+size_sdf)/size_sdf);
-    //         bitmap_sdf[index_sdf+1] = xx (255*(msdf[index_sdf+1]+size_sdf)/size_sdf);
-    //         bitmap_sdf[index_sdf+2] = xx (255*(msdf[index_sdf+2]+size_sdf)/size_sdf);
-    //     }
-    // }
+    bitmap_sdf := NewArray(3*size_sdf*size_sdf, u8);
+    for y: 0..size_sdf - 1 {
+        for x: 0..size_sdf - 1 {
+            index_sdf := calc_index(x, y, size_sdf, 3);
+            bitmap_sdf[index_sdf+0] = xx (255*(msdf[index_sdf+0]+size_sdf)/size_sdf);
+            bitmap_sdf[index_sdf+1] = xx (255*(msdf[index_sdf+1]+size_sdf)/size_sdf);
+            bitmap_sdf[index_sdf+2] = xx (255*(msdf[index_sdf+2]+size_sdf)/size_sdf);
+        }
+    }
 
-    // bitmap := NewArray(3*size_bitmap*size_bitmap, u8);
-    // scale_bitmap := 0.75*cast(float)size_bitmap/size_sdf;
-    // for y: 0..size_bitmap - 1 {
-    //     for x: 0..size_bitmap - 1 {
-    //         index := calc_index(x, y, size_bitmap, 3);
-    //         gx := x/cast(float)size_bitmap*size_sdf;
-    //         gy := y/cast(float)size_bitmap*size_sdf;
-    //         gxi := cast(s32)gx;
-    //         gyi := cast(s32)gy;
+    bitmap := NewArray(3*size_bitmap*size_bitmap, u8);
+    scale_bitmap := 0.75*cast(float)size_bitmap/size_sdf;
+    for y: 0..size_bitmap - 1 {
+        for x: 0..size_bitmap - 1 {
+            index := calc_index(x, y, size_bitmap, 3);
+            gx := x/cast(float)size_bitmap*size_sdf;
+            gy := y/cast(float)size_bitmap*size_sdf;
+            gxi := cast(s32)gx;
+            gyi := cast(s32)gy;
 
-    //         c00: *float = *msdf[calc_index(gxi,   gyi,   size_sdf, 3)];
-    //         c10: *float = *msdf[calc_index(gxi+1, gyi,   size_sdf, 3)];
-    //         c01: *float = *msdf[calc_index(gxi,   gyi+1, size_sdf, 3)];
-    //         c11: *float = *msdf[calc_index(gxi+1, gyi+1, size_sdf, 3)];
-    //         r := blerp(c00[0], c10[0], c01[0], c11[0], gx-gxi, gy-gyi);
-    //         g := blerp(c00[1], c10[1], c01[1], c11[1], gx-gxi, gy-gyi);
-    //         b := blerp(c00[2], c10[2], c01[2], c11[2], gx-gxi, gy-gyi);
+            c00: *float = *msdf[calc_index(gxi,   gyi,   size_sdf, 3)];
+            c10: *float = *msdf[calc_index(gxi+1, gyi,   size_sdf, 3)];
+            c01: *float = *msdf[calc_index(gxi,   gyi+1, size_sdf, 3)];
+            c11: *float = *msdf[calc_index(gxi+1, gyi+1, size_sdf, 3)];
+            r := blerp(c00[0], c10[0], c01[0], c11[0], gx-gxi, gy-gyi);
+            g := blerp(c00[1], c10[1], c01[1], c11[1], gx-gxi, gy-gyi);
+            b := blerp(c00[2], c10[2], c01[2], c11[2], gx-gxi, gy-gyi);
 
-    //         sig_dist := scale_bitmap * (median(r, g, b)-0.5);
-    //         a := clamp(sig_dist+0.5, 1.0, 0.0);
+            sig_dist := scale_bitmap * (median(r, g, b)-0.5);
+            a := clamp(sig_dist+0.5, 1.0, 0.0);
 
-    //         bitmap[index+0] = cast(u8)(255*a);
-    //         bitmap[index+1] = cast(u8)(255*a);
-    //         bitmap[index+2] = cast(u8)(255*a);
-    //     }
-    // }
+            bitmap[index+0] = cast(u8)(255*a);
+            bitmap[index+1] = cast(u8)(255*a);
+            bitmap[index+2] = cast(u8)(255*a);
+        }
+    }
 
-    // stbi_write_png("test_msdf.png", xx size_sdf, xx size_sdf, 3, bitmap_sdf.data, xx (size_sdf*3));
-    // stbi_write_png("test_out.png", xx size_bitmap, xx size_bitmap, 3, bitmap.data, xx (size_sdf*3));
+    stbi_write_png("test_msdf.png", xx size_sdf, xx size_sdf, 3, bitmap_sdf.data, xx (size_sdf*3));
+    stbi_write_png("test_out.png", xx size_bitmap, xx size_bitmap, 3, bitmap.data, xx (size_sdf*3));
 
 }
 

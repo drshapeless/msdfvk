@@ -106,8 +106,39 @@ void print_vec2(vec2 v) {
     printf("(%f, %f)", v[0], v[1]);
 }
 
+void print_edge_color(int color) {
+    switch (color) {
+    case 0:
+        printf("BLACK");
+        break;
+    case 1:
+        printf("RED");
+        break;
+    case 2:
+        printf("GREEN");
+        break;
+    case 3:
+        printf("YELLOW");
+        break;
+    case 4:
+        printf("BLUE");
+        break;
+    case 5:
+        printf("MAGENTA");
+        break;
+    case 6:
+        printf("CYAN");
+        break;
+    case 7:
+        printf("WHITE");
+        break;
+    }
+}
+
 void print_edge_segment(edge_segment_t e) {
-    printf("type: %d, color: %d, ", e.type, e.color);
+    printf("type: %d, color: ", e.type);
+    print_edge_color(e.color);
+    printf(", ");
 
     switch (e.type) {
     case STBTT_vline:
@@ -1076,7 +1107,9 @@ int ex_msdf_glyph_mem(stbtt_fontinfo *font,
                                        initial_color);
                     switch_color(&color, &seed, s);
                 }
-                printf("setting edge %d to color %d\n", index, color);
+                printf("setting edge %d to color ", index);
+                print_edge_color(color);
+                printf("\n");
                 contour_data[i].edges[index].color = color;
             }
         }

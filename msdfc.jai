@@ -1045,131 +1045,96 @@ verts_to_contours :: (verts: []stbtt_vertex) -> []Contour {
 }
 
 // edge coloring related
+is_corner :: (a: Vector2, b: Vector2, cross_threshold: float) -> bool {
+    return dot(a, b) <= 0 || abs(cross(a, b)) > cross_threshold;
+}
+
+// The following is from msdfgl
+switch_color :: (color: *Edge_Segment.Color, seed: *u64, banned: Edge_Segment.Color = .BLACK) {
+    combined := color.* & banned;
+
+    if combined == .RED || combined == .GREEN || combined == .BLUE {
+        color.* = combined ^ .WHITE;
+        return;
+    }
+
+    if color.* == .BLACK || color.* == .WHITE {
+        start := Edge_Segment.Color.[.CYAN, .MAGENTA, .YELLOW];
+        color.* = start[seed.* % 3];
+        seed.* /= 3;
+        return;
+    }
+
+    shifted := color.* << (1 + (seed.* & 1));
+    color.* = (shifted | shifted >> 3) & .WHITE;
+    seed.* >>= 1;
+}
+
 symmetrical_trichotomy :: (position: s64, n: s64) -> s64 {
     return cast(s64) (3.0+2.875*cast(float)position/cast(float)(n-1)-1.4375+0.5) - 3;
 }
 
-is_corner :: (a: Vector2, b: Vector2, threshold: float) -> bool {
-    return dot(a, b) <= 0 || abs(cross(a, b)) > threshold;
-}
-
-seed_extract_2 :: (seed: *u64) -> s32 {
-    v: s32 = cast(s32)(seed.*) & 1;
-    seed.* >>= 1;
-    return v;
-}
-
-seed_extract_3 :: (seed: *u64) -> s32 {
-    v: s32 = cast(s32)(seed.* % 3);
-    seed.* /= 3;
-    return v;
-}
-
-init_color :: (seed: *u64) -> Edge_Segment.Color {
-    colors: [3]Edge_Segment.Color = .[.CYAN, .MAGENTA, .YELLOW];
-    return colors[seed_extract_3(seed)];
-}
-
-switch_color :: (color: *Edge_Segment.Color, seed: *u64) {
-    shifted := cast(Edge_Segment.Color)(color.* << (1+seed_extract_2(seed)));
-    color.* = (shifted|shifted>>3)&.WHITE;
-}
-
-switch_color :: (color: *Edge_Segment.Color, seed: *u64, banned: Edge_Segment.Color) {
-    combined := color.* & banned;
-    if combined == .RED || combined == .GREEN || combined == .BLUE {
-        color.* = combined ^ .WHITE;
-    } else {
-        switch_color(color, seed);
-    }
-}
-
 calculate_edge_colors :: (contours: []Contour, angle_threshold: float = 3.0) {
-    seed: u64;
     cross_threshold := sin(angle_threshold);
-    color := init_color(*seed);
-    log("init color: %", color);
+    seed :u64 = 0;
 
-    corners: [..]s32;
-    for * contour: contours {
+    corners: [..]s64;
+    for contour: contours {
+        array_reset_keeping_memory(*corners);
+
         if contour.edges.count == 0 continue;
-        { // Identify corners
-            array_reset_keeping_memory(*corners);
-            prev_direction := direction(peek(contour.edges), 1);
+        prev_direction := direction(peek(contour.edges), 1);
+        for edge, index: contour.edges {
+            cur_direction := direction(edge, 0);
+            new_prev_direction := direction(edge, 1);
 
-            for edge, index: contour.edges {
-                if is_corner(normalize(prev_direction), normalize(direction(edge, 0)), cross_threshold) {
-                    array_add(*corners, xx index);
-                }
-                prev_direction = direction(edge, 1);
+            if is_corner(normalize(prev_direction), normalize(cur_direction), cross_threshold) {
+                array_add(*corners, index);
+                prev_direction = new_prev_direction;
             }
         }
 
-        log("corners.count: %", corners.count);
-
         if corners.count == 0 {
             // Smooth contour
-            switch_color(*color, *seed);
             for * edge: contour.edges {
-                edge.color = color;
+                edge.color = .WHITE;
             }
         } else if corners.count == 1 {
+            // Teardrop
             colors: [3]Edge_Segment.Color;
-            switch_color(*color, *seed);
-            colors[0] = color;
+            colors[0] = .WHITE;
             colors[1] = .WHITE;
-            switch_color(*color, *seed);
-            colors[2] = color;
+            switch_color(*colors[0], *seed);
+            colors[2] = colors[0];
+            switch_color(*colors[2], *seed);
+
             corner := corners[0];
             if contour.edges.count >= 3 {
-                m := cast(s32)contour.edges.count;
-                for i: 0..m - 1 {
-                    contour.edges[(corner+i)%m].color = colors[1+symmetrical_trichotomy(i, m)];
+                // TODO: cleanup. This is messy
+                for contour.edges {
+                    c: Edge_Segment.Color = colors[1 + symmetrical_trichotomy(it_index, contour.edges.count)];
+                    contour.edges[(corner+it_index)%contour.edges.count].color = c;
                 }
             } else if contour.edges.count >= 1 {
-                // Less than three edge segments for three colors => edges must be split
-
-                // This part is partially rewritten to fit what I
-                // usually in Jai, since we are not using any pointer
-                // magic but simple struct passing around, we have to
-                // keep track of how many parts we operating instead
-                // of the original way of checking NULL.
-                parts: [6]Edge_Segment;
-                part_count: s64;
-                parts[0+3*corner], parts[1+3*corner], parts[2+3*corner] = edge_split(contour.edges[0]);
-                if contour.edges.count >= 2 {
-                    parts[3-3*corner], parts[4-3*corner], parts[5-3*corner] = edge_split(contour.edges[1]);
-                    parts[0].color = colors[0];
-                    parts[1].color = colors[0];
-                    parts[2].color = colors[1];
-                    parts[3].color = colors[1];
-                    parts[4].color = colors[2];
-                    parts[5].color = colors[2];
-                } else {
-                    parts[0].color = colors[0];
-                    parts[1].color = colors[1];
-                    parts[2].color = colors[2];
-                }
-                // TODO: This should do the same
-                array_free(contour.edges);
-                contour.edges = array_copy(array_view(parts, part_count));
+                // Split in third
+                assert(false, "Non-supported shape");
             }
         } else {
             // Multiple corners
-            corner_count := corners.count;
             spline := 0;
             start := corners[0];
             m := contour.edges.count;
-            // switch_color(*color, *seed);
+            color := Edge_Segment.Color.WHITE;
+            switch_color(*color, *seed);
             initial_color := color;
-            log("initial color: %", initial_color);
-            for i: 0..m - 1 {
-                index := (start+i)%m;
-                if spline+1 < corner_count && corners[spline+1] == index {
-                    spline += 1;
-                    switch_color(*color, *seed, cast(Edge_Segment.Color)(spline == corner_count-1)*initial_color);
-                }
+            for contour.edges {
+                index := (start + it_index) % m;
 
+                if spline + 1 < corners.count && corners[spline + 1] == index {
+                    spline += 1;
+                    banned :Edge_Segment.Color = ifx (spline == corners.count - 1) then initial_color else .BLACK;
+                    switch_color(*color, *seed, banned);
+                }
                 log("setting edge % to color %", index, color);
                 contour.edges[index].color = color;
             }

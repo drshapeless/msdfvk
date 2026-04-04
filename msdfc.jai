@@ -58,51 +58,17 @@ generate_msdf :: (font: *stbtt_fontinfo, glyph_index: s32, w: s64, h: s64, autof
     color_edges(contours,, temp);
 
     // normalize shape
-    for * contour: contours {
-        if contour.edges.count == 1 {
-            parts: [3]Edge_Segment;
-            parts[0], parts[1], parts[2] = edge_split(contour.edges[0]);
-            array_free(contour.edges);
-            contour.edges = array_copy(parts);
-        }
-    }
+    // for * contour: contours {
+    //     if contour.edges.count == 1 {
+    //         parts: [3]Edge_Segment;
+    //         parts[0], parts[1], parts[2] = edge_split(contour.edges[0]);
+    //         array_free(contour.edges);
+    //         contour.edges = array_copy(parts);
+    //     }
+    // }
 
     // calculate windings
-    windings := NewArray(contours.count, s32,, temp);
-    for contour: contours {
-        if contour.edges.count == 0 {
-            windings[it_index] = 0;
-            continue;
-        }
-
-        total: float;
-
-        if contour.edges.count == 1 {
-            a := point(contour.edges[0], 0);
-            b := point(contour.edges[0], 1.0/3.0);
-            c := point(contour.edges[0], 2.0/3.0);
-            total += shoelace(a, b);
-            total += shoelace(b, c);
-            total += shoelace(c, a);
-        } else if contour.edges.count == 2 {
-            a := point(contour.edges[0], 0);
-            b := point(contour.edges[0], 0.5);
-            c := point(contour.edges[1], 0);
-            d := point(contour.edges[1], 0.5);
-            total += shoelace(a, b);
-            total += shoelace(b, c);
-            total += shoelace(c, d);
-            total += shoelace(d, a);
-        } else {
-            prev := point(peek(contour.edges), 0);
-            for edge: contour.edges {
-                cur := point(edge, 0);
-                total += shoelace(prev, cur);
-                prev = cur;
-            }
-        }
-        windings[it_index] = (cast(s32)(0 < total) - cast(s32)(total < 0));
-    }
+    windings := get_windings(contours);
 
     contour_sd := NewArray(contours.count, Multi_Distance,, temp);
     for y: 0..h - 1 {
@@ -1148,6 +1114,46 @@ color_edges :: (contours: []Contour) {
             }
         }
     }
+}
+
+get_windings :: (contours: []Contour) -> []s32 {
+    windings := NewArray(contours.count, s32,, temp);
+    for contour: contours {
+        if contour.edges.count == 0 {
+            windings[it_index] = 0;
+            continue;
+        }
+
+        total: float;
+
+        if contour.edges.count == 1 {
+            a := point(contour.edges[0], 0);
+            b := point(contour.edges[0], 1.0/3.0);
+            c := point(contour.edges[0], 2.0/3.0);
+            total += shoelace(a, b);
+            total += shoelace(b, c);
+            total += shoelace(c, a);
+        } else if contour.edges.count == 2 {
+            a := point(contour.edges[0], 0);
+            b := point(contour.edges[0], 0.5);
+            c := point(contour.edges[1], 0);
+            d := point(contour.edges[1], 0.5);
+            total += shoelace(a, b);
+            total += shoelace(b, c);
+            total += shoelace(c, d);
+            total += shoelace(d, a);
+        } else {
+            prev := point(peek(contour.edges), 0);
+            for edge: contour.edges {
+                cur := point(edge, 0);
+                total += shoelace(prev, cur);
+                prev = cur;
+            }
+        }
+        windings[it_index] = (cast(s32)(0 < total) - cast(s32)(total < 0));
+    }
+
+    return windings;
 }
 
 pixel_at :: (x: s64, y: s64, w: s64, bitmap: []float) -> Vector3 {

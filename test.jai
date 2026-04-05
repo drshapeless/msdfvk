@@ -12,7 +12,10 @@ main :: () {
     scale := stbtt_ScaleForPixelHeight(*font, xx size_sdf);
     baseline := cast(s32)(cast(float)ascent*scale);
 
-    msdf := generate_msdf(*font, stbtt_FindGlyphIndex(*font, #char "1"), size_sdf, size_sdf);
+    shape, metrics := make_shape(*font, stbtt_FindGlyphIndex(*font, #char "J"), size_sdf, size_sdf);
+    windings := prepare_shape(*shape);
+
+    msdf := generate_msdf(shape, windings, metrics, size_sdf, size_sdf);
 
     bitmap_sdf := NewArray(3*size_sdf*size_sdf, u8);
     for y: 0..size_sdf - 1 {
@@ -81,4 +84,4 @@ median :: (r: float, g: float, b: float) -> float {
 #import "Math";
 #import "stb_truetype";
 #import "stb_image_write";
-#import,file "module.jai";
+#import,file "module.jai"(STB_TRUETYPE = true);

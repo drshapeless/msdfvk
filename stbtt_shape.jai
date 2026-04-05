@@ -1,5 +1,6 @@
-make_shape :: (font: *stbtt_fontinfo, glyph_index: s32, w: s64, h: s64, autofit := true) -> Shape,  Metrics {
+make_shape :: (font: *stbtt_fontinfo, glyph_index: s32, w: s64, h: s64, autofit := false) -> Shape,  Metrics {
     scale := stbtt_ScaleForMappingEmToPixels(font, xx h);
+    log("scale %", scale);
 
     ix0, iy0, ix1, iy1: s32;
     xoff := 0.5;
@@ -11,21 +12,20 @@ make_shape :: (font: *stbtt_fontinfo, glyph_index: s32, w: s64, h: s64, autofit 
         // calculate new height
         newh := h + (h - (iy1 - iy0) * scale) - 4;
         // calculate new scale
-        // see 'stbtt_ScaleForMappingEmToPixels' in stb_truetype.h
-        p := font.data + font.head + 18;
-        units_per_em := p[0] * 256 + p[1];
-        scale = newh / units_per_em;
+        scale = stbtt_ScaleForMappingEmToPixels(font, xx newh);
 
         // make sure we are centered
         xoff = 0;
         yoff = 0;
     }
 
+    log("i % % % %", ix0, iy0, ix1, iy1);
+    log("width %, height %", ix1-ix0, iy1-iy0);
+
     left_bearing, advance: s32;
     stbtt_GetGlyphHMetrics(font, glyph_index, *advance, *left_bearing);
-    left_bearing = xx (cast(float)left_bearing*scale);
 
-    translate_x := (w/2) - (xx (ix1 - ix0)*scale)/2 - left_bearing;
+    translate_x := (w/2) - (xx (ix1 - ix0)*scale)/2 - left_bearing*scale;
     translate_y := (h/2) - (xx (iy1 - iy0)*scale)/2 - iy0*scale;
 
     metrics := Metrics.{

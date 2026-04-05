@@ -1,4 +1,4 @@
-#module_parameters(STB_TRUETYPE := false);
+#module_parameters(STB_TRUETYPE := false, HARFBUZZ := false);
 Signed_Distance :: struct {
     dist: float;
     d:    float;
@@ -266,6 +266,12 @@ generate_msdf :: (shape: Shape, windings: []s32, metrics: Metrics, w: s64, h: s6
 #if STB_TRUETYPE {
     #load "stbtt_shape.jai";
 }
+
+#if HARFBUZZ {
+    #load "hb_shape.jai";
+}
+
+#load "bitmap.jai";
 
 #scope_file
 INF :: -1.0e24;
